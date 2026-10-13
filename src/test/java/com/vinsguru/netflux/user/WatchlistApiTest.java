@@ -3,6 +3,9 @@ package com.vinsguru.netflux.user;
 import com.vinsguru.netflux.user.dto.AddWatchlistRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restclient.test.autoconfigure.AutoConfigureMockRestServiceServer;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
@@ -147,28 +150,55 @@ class WatchlistApiTest {
         assertThat(getWatchlist(1001L)).containsExactly(300L, 100L, 200L);
     }
 
-    @Test
-    @DisplayName("Should return 400 ProblemDetail when movieId is missing")
-    void shouldReturn400WhenMovieIdMissing() {
-        var problem = addToWatchlist(1001L, null)
+    @ParameterizedTest(name = "movieId: {0}")
+    @NullSource
+    @ValueSource(longs = {0, -1})
+    @DisplayName("Should return 400 ProblemDetail when movieId is missing or not positive")
+    void shouldReturn400WhenMovieIdInvalid(Long movieId) {
+        var problem = addToWatchlist(1001L, movieId)
                 .expectStatus().isBadRequest()
                 .expectBody(ProblemDetail.class)
                 .returnResult()
                 .getResponseBody();
 
         assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getDetail()).isEqualTo("Validation failed");
+        assertThat(getWatchlist(1001L)).containsExactly(300L, 100L, 200L);
+    }
+
+    @ParameterizedTest(name = "body: {0}")
+    @ValueSource(strings = {"", "{bad json", "{\"movieId\": \"abc\"}"})
+    @DisplayName("Should return 400 ProblemDetail when the watchlist body is malformed or empty")
+    void shouldReturn400WhenWatchlistBodyMalformed(String body) {
+        var problem = restTestClient.post()
+                .uri("/api/users/watchlist")
+                .header(USER_ID_HEADER, "1001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody(ProblemDetail.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getDetail()).isEqualTo("Malformed or missing request body");
     }
 
     @Test
-    @DisplayName("Should return 400 ProblemDetail when movieId is not positive")
-    void shouldReturn400WhenMovieIdNotPositive() {
-        var problem = addToWatchlist(1001L, 0L)
+    @DisplayName("Should return 400 ProblemDetail when removing with a non-numeric movieId")
+    void shouldReturn400WhenRemovingNonNumericMovieId() {
+        var problem = restTestClient.delete()
+                .uri("/api/users/watchlist/{movieId}", "abc")
+                .header(USER_ID_HEADER, "1001")
+                .exchange()
                 .expectStatus().isBadRequest()
                 .expectBody(ProblemDetail.class)
                 .returnResult()
                 .getResponseBody();
 
         assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(getWatchlist(1001L)).containsExactly(300L, 100L, 200L);
     }
 
     @Test

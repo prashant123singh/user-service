@@ -5,6 +5,9 @@ import com.vinsguru.netflux.user.dto.LoginResponse;
 import com.vinsguru.netflux.user.dto.RegisterRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,6 +23,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 import java.security.KeyPair;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,13 +79,14 @@ class AuthApiTest {
         assertThat(problem.getStatus()).isEqualTo(409);
     }
 
-    @Test
-    @DisplayName("Should return 400 ProblemDetail when a register field is blank")
-    void shouldReturn400WhenRegisterFieldBlank() {
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidRegisterRequests")
+    @DisplayName("Should return 400 ProblemDetail when a register field is missing or blank")
+    void shouldReturn400WhenRegisterFieldInvalid(RegisterRequest request) {
         var problem = restTestClient.post()
                 .uri("/api/users/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(new RegisterRequest("dave", " ", "Dave"))
+                .body(request)
                 .exchange()
                 .expectStatus().isBadRequest()
                 .expectBody(ProblemDetail.class)
@@ -89,6 +94,21 @@ class AuthApiTest {
                 .getResponseBody();
 
         assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getDetail()).isEqualTo("Validation failed");
+    }
+
+    @ParameterizedTest(name = "body: {0}")
+    @ValueSource(strings = {"", "{bad json"})
+    @DisplayName("Should return 400 ProblemDetail when the register body is malformed or empty")
+    void shouldReturn400WhenRegisterBodyMalformed(String body) {
+        var problem = postRaw("/api/users/register", body)
+                .expectStatus().isBadRequest()
+                .expectBody(ProblemDetail.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getDetail()).isEqualTo("Malformed or missing request body");
     }
 
     @Test
@@ -140,16 +160,52 @@ class AuthApiTest {
         assertThat(problem.getDetail()).isEqualTo("Invalid username or password");
     }
 
-    @Test
-    @DisplayName("Should return 400 ProblemDetail when a login field is blank")
-    void shouldReturn400WhenLoginFieldBlank() {
-        var problem = login(new LoginRequest("alice", ""))
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidLoginRequests")
+    @DisplayName("Should return 400 ProblemDetail when a login field is missing or blank")
+    void shouldReturn400WhenLoginFieldInvalid(LoginRequest request) {
+        var problem = login(request)
                 .expectStatus().isBadRequest()
                 .expectBody(ProblemDetail.class)
                 .returnResult()
                 .getResponseBody();
 
         assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getDetail()).isEqualTo("Validation failed");
+    }
+
+    @ParameterizedTest(name = "body: {0}")
+    @ValueSource(strings = {"", "{bad json"})
+    @DisplayName("Should return 400 ProblemDetail when the login body is malformed or empty")
+    void shouldReturn400WhenLoginBodyMalformed(String body) {
+        var problem = postRaw("/api/users/login", body)
+                .expectStatus().isBadRequest()
+                .expectBody(ProblemDetail.class)
+                .returnResult()
+                .getResponseBody();
+
+        assertThat(problem.getStatus()).isEqualTo(400);
+        assertThat(problem.getDetail()).isEqualTo("Malformed or missing request body");
+    }
+
+    static Stream<RegisterRequest> invalidRegisterRequests() {
+        return Stream.of(
+                new RegisterRequest(null, "pa55word", "Dave"),
+                new RegisterRequest(" ", "pa55word", "Dave"),
+                new RegisterRequest("dave", null, "Dave"),
+                new RegisterRequest("dave", " ", "Dave"),
+                new RegisterRequest("dave", "pa55word", null),
+                new RegisterRequest("dave", "pa55word", " ")
+        );
+    }
+
+    static Stream<LoginRequest> invalidLoginRequests() {
+        return Stream.of(
+                new LoginRequest(null, "secret123"),
+                new LoginRequest(" ", "secret123"),
+                new LoginRequest("alice", null),
+                new LoginRequest("alice", " ")
+        );
     }
 
     private RestTestClient.ResponseSpec login(LoginRequest request) {
@@ -157,6 +213,14 @@ class AuthApiTest {
                 .uri("/api/users/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
+                .exchange();
+    }
+
+    private RestTestClient.ResponseSpec postRaw(String uri, String body) {
+        return restTestClient.post()
+                .uri(uri)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
                 .exchange();
     }
 }
